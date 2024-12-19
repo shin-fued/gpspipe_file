@@ -73,120 +73,96 @@ char* strip_path(char* name){
 	return path;
 }
 
-void write_data(char* data) {
-    char row_rt[1024];
-    char row_hist[1024];
-    const cJSON *lat_j = NULL;
-    const cJSON *lon_j = NULL;
-    const cJSON *alt_j = NULL;
-    const cJSON *date_j = NULL;
-    cJSON *data_json = cJSON_Parse(data);
-    if (data_json == NULL) {
-        const char *error_ptr = cJSON_GetErrorPtr();
-        if (error_ptr != NULL) {
-            fprintf(stderr, "Error before: %s\n", error_ptr);
-        }
-        return;  // Exit if parsing failed
-    }
-    char* path = strip_path(gps_path);
-    char* path_rt = strip_path(gps_path_rt);
-    FILE* fp;
-    if (access(path, F_OK) == 0) {
-	    fp = fopen(path, "a");
-    } 
-    else {
-	    fp =fopen(path, "a");
-	    fputs(col_name,fp);
-    }
-    FILE* fp_rt = fopen(path_rt, "w");
-    
-    lat_j = cJSON_GetObjectItemCaseSensitive(data_json, "lat");
-    lon_j = cJSON_GetObjectItemCaseSensitive(data_json, "lon");
-    alt_j = cJSON_GetObjectItemCaseSensitive(data_json, "alt");
-    date_j = cJSON_GetObjectItemCaseSensitive(data_json, "time");
-    char* sensor_id =get_sensor_id();
-    // printf("sensor_id: %s\n", sensor_id);
-    int len = strlen(sensor_id);
-    write_row(sensor_id, row_hist, 0, len);
-    write_row(sensor_id, row_rt, 0, len);
-    row_hist[len] = ',';
-    row_rt[len] = ',';
-    len+=1;
-    int len_rt=len;
+void write_data(const char* data) {
+    if (!data) return;
 
+    char row_rt[1024] = {0};
+    char row_hist[1024] = {0};
+
+    cJSON* data_json = cJSON_Parse(data);
+    if (!data_json) {
+        fprintf(stderr, "Failed to parse JSON data.\n");
+        return;
+    }
+
+    FILE* fp = fopen(gps_path, "a");
+    if (!fp) {
+        fprintf(stderr, "Failed to open history file.\n");
+        cJSON_Delete(data_json);
+        return;
+    }
+
+    FILE* fp_rt = fopen(gps_path_rt, "w");
+    if (!fp_rt) {
+        fprintf(stderr, "Failed to open realtime file.\n");
+        fclose(fp);
+        cJSON_Delete(data_json);
+        return;
+    }
+
+    // Write headers if the history file is empty
+    fseek(fp, 0, SEEK_END);
+    if (ftell(fp) == 0) {
+        fprintf(fp, "%s", col_name);
+    }
+    fprintf(fp_rt, "%s", col_name);
+
+    char* sensor_id = get_sensor_id();
+    if (!sensor_id) {
+        fclose(fp);
+        fclose(fp_rt);
+        cJSON_Delete(data_json);
+        return;
+    }
+
+    int len = snprintf(row_hist, sizeof(row_hist), "%s,", sensor_id);
+    int len_rt = snprintf(row_rt, sizeof(row_rt), "%s,", sensor_id);;
+
+    const cJSON* date_j = cJSON_GetObjectItemCaseSensitive(data_json, "time");
     if (date_j) {
-        char *unf_date = cJSON_Print(date_j);
+        char* unf_date = cJSON_PrintUnformatted(date_j);
         char* date = reformat_date(unf_date, 0);
         char* time = reformat_date(unf_date, 1);
-        write_row(date, row_hist, len, len+strlen(date));
-        len+=strlen(date);
-        write_row(time, row_rt, len_rt, len_rt+strlen(time));
-	    len_rt+=strlen(time);
-        //printf("time: %s\n", time);
-	//printf("date: %s\n", date);
-	    row_hist[len] = ',';
-	    row_rt[len_rt] = ',';
-	    len+=1;
-	    len_rt+=1;
-        free(time);
-        free(date);
+        free(unf_date);
+
+        if (date && time) {
+            len += snprintf(row_hist + len, sizeof(row_hist) - len, "%s,", date);
+            len_rt += snprintf(row_rt + len_rt, sizeof(row_rt) - len_rt, "%s,", time);
+            free(date);
+            free(time);
+        }
     }
-    
+
+    const cJSON* lat_j = cJSON_GetObjectItemCaseSensitive(data_json, "lat");
+    const cJSON* lon_j = cJSON_GetObjectItemCaseSensitive(data_json, "lon");
+    const cJSON* alt_j = cJSON_GetObjectItemCaseSensitive(data_json, "alt");
+
     if (lat_j) {
-        char *lat = cJSON_Print(lat_j);
-        write_row(lat, row_hist, len, len+strlen(lat));
-	    write_row(lat, row_rt, len_rt, len_rt+strlen(lat));
-	    len_rt+=strlen(lat);
-	    len+=strlen(lat);
-	    row_hist[len] = ',';
-        row_rt[len_rt] = ',';
-        len+=1;
-        len_rt+=1;
+        char* lat = cJSON_PrintUnformatted(lat_j);
+        len += snprintf(row_hist + len, sizeof(row_hist) - len, "%s,", lat);
+        len_rt += snprintf(row_rt + len_rt, sizeof(row_rt) - len_rt, "%s,", lat);
         free(lat);
     }
     if (lon_j) {
-        char *lon = cJSON_Print(lon_j);
-        write_row(lon, row_hist, len, len+strlen(lon));
-        write_row(lon, row_rt, len_rt, len_rt+strlen(lon));
-	len_rt+=strlen(lon);
-        len+=strlen(lon);
-        row_hist[len] = ',';
-        row_rt[len_rt] = ',';
-        len+=1;
-        len_rt+=1;
+        char* lon = cJSON_PrintUnformatted(lon_j);
+        len += snprintf(row_hist + len, sizeof(row_hist) - len, "%s,", lon);
+        len_rt += snprintf(row_rt + len_rt, sizeof(row_rt) - len_rt, "%s,", lon);
         free(lon);
     }
-
     if (alt_j) {
-        char *alt = cJSON_Print(alt_j);
-        write_row(alt, row_hist, len, len+strlen(alt));
-        write_row(alt, row_rt, len_rt, len_rt+strlen(alt));
-        len_rt+=strlen(alt);
-        len+=strlen(alt);
-        row_hist[len] = ',';
-        row_rt[len_rt] = ',';
-        len+=1;
-        len_rt+=1;
+        char* alt = cJSON_PrintUnformatted(alt_j);
+        len += snprintf(row_hist + len, sizeof(row_hist) - len, "%s\n", alt);
+        len_rt += snprintf(row_rt + len_rt, sizeof(row_rt) - len_rt, "%s\n", alt);
         free(alt);
     }
-    row_hist[len]='\0';
-    row_rt[len_rt]='\0';
-    printf("row_rt: %s\n", row_rt);
-    printf("row_hist: %s\n", row_hist);
+
     fputs(row_hist, fp);
-    char rt_temp[1024];
-    strcpy(rt_temp, col_name);
-    strcat(rt_temp, row_rt);
-    char* rt_data=strip_path(rt_temp);
-    fputs(rt_data, fp_rt);
+    fputs(row_rt, fp_rt);
+
     free(sensor_id);
-    cJSON_Delete(data_json);  // Free the cJSON object
-    
+    cJSON_Delete(data_json);
     fclose(fp);
     fclose(fp_rt);
-    free(path);
-    free(path_rt);
-    free(rt_data);
 }
 
 void get_lat_lon_h() {
