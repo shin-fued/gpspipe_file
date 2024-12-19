@@ -8,10 +8,13 @@
 #include <unistd.h>
 #include <time.h>
 #include <unistd.h>
+#define GPS_PATH_BASE "/opt/IMAGINE-B5G/realtime/GPS/"
+#define SENSOR_GET_CMD "python3 /opt/utils/get_sensor_id.py > sensor.txt"
+#define GPSPIPE_CMD "gpspipe -w -n 10 | grep -m 1 lon > temp.txt"
+#define COL_NAME "sensor_id,date,lat,long,alt\n"
+#define MAX_BUFFER_SIZE 1024
 
-static const char* col_name="sensor_id,date,lat,long,alt\n";
-static char gps_path[100] = "/opt/IMAGINE-B5G/realtime/GPS/";
-static char gps_path_rt[100] = "/opt/IMAGINE-B5G/realtime/GPS/";
+
 
 
 char* reformat_date(char* data, int jt){
@@ -41,7 +44,7 @@ char* get_sensor_id() {
         fprintf(stderr, "Memory allocation failed.\n");
         return NULL;
     }
-    system("python3 /opt/utils/get_sensor_id.py > sensor.txt");
+    system(SENSOR_GET_CMD);
     FILE* file = fopen("sensor.txt", "r");
     if (file != NULL) {
         fgets(line, 5, file);
@@ -63,21 +66,14 @@ void write_row(char* src,char* dest,int start,int stop){
     }
 }
 
-char* strip_path(char* name){
-	int n;
-	while(name[n]<'\0'){n++;}
-	char* path = malloc(n);
-    for(int i=0; i<n; i++){
-        path[i]=name[i];
+void write_data(const char* data, const char* hist_path, const char* rt_path) {
+    if (!data) {
+        fprintf(stderr, "No data.\n");
+        return;
     }
-	return path;
-}
 
-void write_data(const char* data) {
-    if (!data) return;
-
-    char row_rt[1024] = {0};
-    char row_hist[1024] = {0};
+    char row_rt[1024];
+    char row_hist[1024];
 
     cJSON* data_json = cJSON_Parse(data);
     if (!data_json) {
@@ -85,27 +81,23 @@ void write_data(const char* data) {
         return;
     }
 
-    FILE* fp = fopen(gps_path, "a");
-    if (!fp) {
-        fprintf(stderr, "Failed to open history file.\n");
+    FILE* fp_hist = fopen(hist_path, "a");
+    FILE* fp_rt = fopen(rt_path, "w");
+    if (!fp_hist || !fp_rt) {
+        fprintf(stderr, "Failed to open files for writing.\n");
         cJSON_Delete(data_json);
+        fclose(fp_hist);
+        fclose(fp_rt);
         return;
     }
 
-    FILE* fp_rt = fopen(gps_path_rt, "w");
-    if (!fp_rt) {
-        fprintf(stderr, "Failed to open realtime file.\n");
-        fclose(fp);
-        cJSON_Delete(data_json);
-        return;
+    // Write headers if history file is empty
+    fseek(fp_hist, 0, SEEK_END);
+    if (ftell(fp_hist) == 0) {
+        fputs(COL_NAME, fp_hist);
     }
+    fputs(COL_NAME, fp_rt);
 
-    // Write headers if the history file is empty
-    fseek(fp, 0, SEEK_END);
-    if (ftell(fp) == 0) {
-        fprintf(fp, "%s", col_name);
-    }
-    fprintf(fp_rt, "%s", col_name);
 
     char* sensor_id = get_sensor_id();
     if (!sensor_id) {
@@ -115,8 +107,8 @@ void write_data(const char* data) {
         return;
     }
 
-    int len = snprintf(row_hist, sizeof(row_hist), "%s,", sensor_id);
-    int len_rt = snprintf(row_rt, sizeof(row_rt), "%s,", sensor_id);;
+    int len = snprintf(row_hist, strlen(sensor_id), "%s,", sensor_id);
+    int len_rt = snprintf(row_rt, strlen(sensor_id), "%s,", sensor_id);;
 
     const cJSON* date_j = cJSON_GetObjectItemCaseSensitive(data_json, "time");
     if (date_j) {
@@ -126,8 +118,8 @@ void write_data(const char* data) {
         free(unf_date);
 
         if (date && time) {
-            len += snprintf(row_hist + len, sizeof(row_hist) - len, "%s,", date);
-            len_rt += snprintf(row_rt + len_rt, sizeof(row_rt) - len_rt, "%s,", time);
+            len += snprintf(row_hist, strlen(date), "%s,", date);
+            len_rt += snprintf(row_rt, strlen(time), "%s,", time);
             free(date);
             free(time);
         }
@@ -138,43 +130,44 @@ void write_data(const char* data) {
     const cJSON* alt_j = cJSON_GetObjectItemCaseSensitive(data_json, "alt");
 
     if (lat_j) {
-        char* lat = cJSON_PrintUnformatted(lat_j);
-        len += snprintf(row_hist + len, sizeof(row_hist) - len, "%s,", lat);
-        len_rt += snprintf(row_rt + len_rt, sizeof(row_rt) - len_rt, "%s,", lat);
+        char* lat = cJSON_Print(lat_j);
+        len += snprintf(row_hist, strlen(lat), "%s,", lat);
+        len_rt += snprintf(row_rt, strlen(lat), "%s,", lat);
         free(lat);
     }
     if (lon_j) {
-        char* lon = cJSON_PrintUnformatted(lon_j);
-        len += snprintf(row_hist + len, sizeof(row_hist) - len, "%s,", lon);
-        len_rt += snprintf(row_rt + len_rt, sizeof(row_rt) - len_rt, "%s,", lon);
+        char* lon = cJSON_Print(lon_j);
+        len += snprintf(row_hist, strlen(lon), "%s,", lon);
+        len_rt += snprintf(row_rt, strlen(lon), "%s,", lon);
         free(lon);
     }
     if (alt_j) {
         char* alt = cJSON_PrintUnformatted(alt_j);
-        len += snprintf(row_hist + len, sizeof(row_hist) - len, "%s\n", alt);
-        len_rt += snprintf(row_rt + len_rt, sizeof(row_rt) - len_rt, "%s\n", alt);
+        len += snprintf(row_hist, strlen(alt), "%s\n", alt);
+        len_rt += snprintf(row_rt, strlen(alt), "%s\n", alt);
         free(alt);
     }
+    printf("row hist: %s\n", row_hist);
+    printf("row rt: %s\n", row_rt);
 
-    fputs(row_hist, fp);
+    fputs(row_hist, fp_hist);
     fputs(row_rt, fp_rt);
 
     free(sensor_id);
     cJSON_Delete(data_json);
-    fclose(fp);
+    fclose(fp_hist);
     fclose(fp_rt);
 }
 
-void get_lat_lon_h() {
+void get_lat_lon_h(const char* hist_path, const char* rt_path) {
     FILE *fptr;
-    char* cmd = "gpspipe -w -n 10 | grep -m 1 lon > temp.txt";
-    system(cmd);
+    system(GPSPIPE_CMD);
     fptr = fopen("temp.txt", "r");
     
     char buffer[2048];
     if (fptr != NULL) {
         while (fgets(buffer, sizeof(buffer), fptr)) {
-            write_data(buffer);
+            write_data(buffer, hist_path, rt_path);
         }
         fclose(fptr);
         remove("temp.txt");  // Remove the temporary file
@@ -184,37 +177,24 @@ void get_lat_lon_h() {
 }
 
 int main() {
+    char hist_path[MAX_BUFFER_SIZE], rt_path[MAX_BUFFER_SIZE];
+    char date[11];
+    time_t now = time(NULL);
+    struct tm* tm_struct = localtime(&now);
+    strftime(date, sizeof(date), "%Y-%m-%d", tm_struct);
+    char* sensor_id = get_sensor_id();
+    if (!sensor_id){
+	    perror("Error getting sesnor value");
+	    return 1;
+    }
+    snprintf(hist_path, sizeof(hist_path), "%s%s_gps_%s.csv", GPS_PATH_BASE, sensor_id, date);
+    snprintf(rt_path, sizeof(rt_path), "%s%s_gps_realtime.csv", GPS_PATH_BASE, sensor_id);
+
+    free(sensor_id);
+    //printf("rt_path: %s\n", rt_path);
+    //printf("hist_path: %s\n", hist_path);
     while (1) {
-        char dt[11];  // Buffer to hold the date in "YYYY-MM-DD" format
-        time_t now = time(NULL);  // Get the current time
-        struct tm *tm_struct = localtime(&now);  // Convert to local time structure
-
-        if (tm_struct != NULL) {
-            // Format the date into the string
-            strftime(dt, sizeof(dt), "%Y-%m-%d", tm_struct);
-        } else {
-            fprintf(stderr, "Failed to retrieve the current time.\n");
-        }
-        char* sensor=get_sensor_id();
-	    if (!sensor) {
-            break;
-        }
-	    char sensor_id[5];
-        for(int i=0; i<5; i++){
-            sensor_id[i]=sensor[i];
-        }
-        free(sensor);
-	//printf("sensor: %s\n", sensor_id);
-        strcat(gps_path, sensor_id);
-        strcat(gps_path_rt, sensor_id);
-
-        strcat(gps_path, "_gps_");
-        strcat(gps_path_rt, "_gps_realtime.csv\0");
-	printf("date: %s", dt);
-        strcat(gps_path, dt);
-        strcat(gps_path, ".csv\0");
-        printf("gps_path: %s", gps_path);
-	get_lat_lon_h();
+       	//get_lat_lon_h(hist_path, rt_path);
         sleep(10);  // Sleep for 10 seconds
     }
     return 0;
