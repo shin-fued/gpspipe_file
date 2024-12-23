@@ -143,10 +143,10 @@ void write_data(const char* data, const char* hist_path, const char* rt_path) {
     if (lat_j) {
         char* lat = cJSON_Print(lat_j);
         write_row(lat, row_hist, len, len+strlen(lat));
-	write_row(lat, row_rt, len_rt, len_rt+strlen(lat));
-	len_rt+=strlen(lat);
-	len+=strlen(lat);
-	row_hist[len] = ',';
+	    write_row(lat, row_rt, len_rt, len_rt+strlen(lat));
+	    len_rt+=strlen(lat);
+	    len+=strlen(lat);
+	    row_hist[len] = ',';
         row_rt[len_rt] = ',';
         len+=1;
         len_rt+=1;
@@ -155,10 +155,10 @@ void write_data(const char* data, const char* hist_path, const char* rt_path) {
     if (lon_j) {
         char* lon = cJSON_Print(lon_j);
         write_row(lon, row_hist, len, len+strlen(lon));
-	write_row(lon, row_rt, len_rt, len_rt+strlen(lon));
-	len_rt+=strlen(lon);
-	len+=strlen(lon);
-	row_hist[len] = ',';
+	    write_row(lon, row_rt, len_rt, len_rt+strlen(lon));
+	    len_rt+=strlen(lon);
+	    len+=strlen(lon);
+	    row_hist[len] = ',';
         row_rt[len_rt] = ',';
         len+=1;
         len_rt+=1;
@@ -167,9 +167,9 @@ void write_data(const char* data, const char* hist_path, const char* rt_path) {
     if (alt_j) {
         char* alt = cJSON_Print(alt_j);
         write_row(alt, row_hist, len, len+strlen(alt));
-	write_row(alt, row_rt, len_rt, len_rt+strlen(alt));
-	len_rt+=strlen(alt);
-	len+=strlen(alt);
+	    write_row(alt, row_rt, len_rt, len_rt+strlen(alt));
+	    len_rt+=strlen(alt);
+	    len+=strlen(alt);
         free(alt);
     }
     row_hist[len]='\n';
@@ -215,8 +215,7 @@ int main() {
     }
     strcpy(sensor_id, temp);
     free(temp);
-    snprintf(rt_path, sizeof(rt_path), "%s%s_gps_realtime.csv", GPS_PATH_BASE, sensor_id);
-    const char* csv = ".csv";
+    snprintf(rt_path, sizeof(rt_path), "%s%s_gps_realtime.csv", GPS_PATH_BASE, sensor_id); 
     //printf("rt_path: %s\n", rt_path);
     //printf("rt_path: %s\n", rt_path);
     //printf("hist_path: %s\n", hist_path);
@@ -225,8 +224,10 @@ int main() {
         time_t now = time(NULL);
         struct tm* tm_struct = localtime(&now);
         strftime(date, sizeof(date), "%Y-%m-%d", tm_struct);
+        char date_csv[15];
+        snprintf(date_csv, 15, "%s.csv", date);
         //check if our current day path is complete;
-        if(strstr(hist_path, csv)==NULL){
+        if(strstr(hist_path, date_csv)==NULL){
             snprintf(hist_path, sizeof(hist_path), "%s%s_gps_%s.csv", GPS_PATH_BASE, sensor_id, date);
         }
         
